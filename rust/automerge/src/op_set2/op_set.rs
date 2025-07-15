@@ -1177,21 +1177,69 @@ impl OpsFound<'_> {
         self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
     }
 
-    pub(crate) fn check_for_noop(&mut self, action: &mut types::OpType) -> bool {
+    /// Determine what action to take based on the found operations
+    ///
+    /// The action provided by the user may actually not be needed, or it may
+    /// not result in visible changes to the document. This method determines
+    /// what the `ResolvedAction` representing these cases should be and also
+    /// updates the `OpsFound::ops` where necessary.
+    ///
+    /// # Returns
+    ///
+    /// `Some(ResolvedAction)` if there is an op which needs to be inserted into
+    /// the opset, or `None` otherwise
+    pub(crate) fn resolve_action(
+        &mut self,
+        original_action: types::OpType,
+    ) -> Option<ResolvedAction> {
         if let Some(op) = self.ops.last() {
-            if let types::OpType::Put(v) = action {
+            if let types::OpType::Put(v) = &original_action {
                 if op.action == Action::Set && &op.value == v {
-                    self.ops.pop();
-                    *action = types::OpType::Delete;
-                    return true;
+                    if self.ops.len() == 1 {
+                        // There's one operation with the same value as the incoming action,
+                        // we don't need to do anything at all
+                        return None;
+                    } else {
+                        self.ops.pop();
+                        return Some(ResolvedAction::ConflictResolution(types::OpType::Delete));
+                    }
                 }
             }
+        } else if original_action == types::OpType::Delete {
+            // If the original action is a delete and there are no existing ops we don't need to do anything
+            return None;
         }
-        false
+        Some(ResolvedAction::VisibleUpdate(original_action))
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         self.ops.last().and_then(|o| o.cursor().ok())
+    }
+}
+
+/// The "resolved" action of an operation returned by the `OpsFound::resolve_action` method.
+///
+/// This enum is necessary to distinguish between two kinds of action we need to take:
+///
+/// * Actions which have a visible effect on the document, such as inserting new values
+/// * Actions which just resolve conflicts, without changing the document state
+///
+/// It's useful to distinguish these so that we can tell whether we need to generate
+/// patches for the operation or not.
+pub(crate) enum ResolvedAction {
+    // An operation which resolves a conflict but does not change the observed state
+    // I.e. it is invisible to the materialized view
+    ConflictResolution(types::OpType),
+    // A normal operation which is visible in the document
+    VisibleUpdate(types::OpType),
+}
+
+impl ResolvedAction {
+    pub(crate) fn action(&self) -> types::OpType {
+        match self {
+            ResolvedAction::ConflictResolution(action) => action.clone(),
+            ResolvedAction::VisibleUpdate(action) => action.clone(),
+        }
     }
 }
 

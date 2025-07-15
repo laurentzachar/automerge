@@ -367,7 +367,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: &ObjMeta,
         prop: String,
-        mut action: OpType,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
@@ -375,20 +375,20 @@ impl TransactionInner {
             .ops()
             .seek_ops_by_map_key(&obj.id, &prop, self.scope.as_ref());
 
-        let noop = query.check_for_noop(&mut action);
-        //if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-        if query.ops.is_empty() && action == OpType::Delete {
+        let Some(resolved_action) = query.resolve_action(action) else {
             return Ok(None);
-        }
+        };
 
         // increment operations are only valid against counter values.
         // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+        if matches!(resolved_action.action(), OpType::Increment(_))
+            && query.ops.iter().all(|op| !op.is_counter())
+        {
             return Err(AutomergeError::MissingCounter);
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::map(id, *obj, query.end_pos, action, prop, pred, noop);
+        let op = TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred);
 
         let inc_value = op.get_increment_value();
 
@@ -409,7 +409,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: &ObjMeta,
         index: usize,
-        mut action: OpType,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let encoding = patch_log.text_rep().encoding(obj.typ);
         let mut query = doc
@@ -422,21 +422,21 @@ impl TransactionInner {
             .and_then(|op| op.cursor().ok())
             .ok_or(AutomergeError::InvalidIndex(index))?;
 
-        let noop = query.check_for_noop(&mut action);
-        //if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-        if query.ops.is_empty() && action == OpType::Delete {
+        let Some(resolved_action) = query.resolve_action(action) else {
             return Ok(None);
-        }
+        };
 
         // increment operations are only valid against counter values.
         // if there are multiple values (from conflicts) then we just need one of them to be a counter.
 
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+        if matches!(resolved_action.action(), OpType::Increment(_))
+            && query.ops.iter().all(|op| !op.is_counter())
+        {
             return Err(AutomergeError::MissingCounter);
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::list(id, *obj, query.end_pos, index, action, eid, pred, noop);
+        let op = TxOp::list(id, *obj, query.end_pos, index, resolved_action, eid, pred);
         let inc_value = op.get_increment_value();
         let succ = query
             .ops

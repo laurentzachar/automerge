@@ -1,5 +1,5 @@
 use super::hexane::{ColumnDataIter, DeltaCursor, IntCursor};
-use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet};
+use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction};
 use super::types::{
     Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
 };
@@ -262,12 +262,15 @@ impl TxOp {
         obj: ObjMeta,
         pos: usize,
         index: usize,
-        _action: types::OpType,
+        action: ResolvedAction,
         elemid: ElemId,
         pred: Vec<OpId>,
-        noop: bool,
     ) -> Self {
-        let (action, value, expand, mark_name) = _action.clone().decompose();
+        let (action, noop) = match action {
+            ResolvedAction::ConflictResolution(action) => (action, true),
+            ResolvedAction::VisibleUpdate(action) => (action, false),
+        };
+        let (action, value, expand, mark_name) = action.clone().decompose();
         TxOp {
             obj_type: obj.typ,
             pos,
@@ -291,12 +294,15 @@ impl TxOp {
         id: OpId,
         obj: ObjMeta,
         pos: usize,
-        _action: types::OpType,
+        action: ResolvedAction,
         prop: String,
         pred: Vec<OpId>,
-        noop: bool,
     ) -> Self {
-        let (action, value, expand, mark_name) = _action.clone().decompose();
+        let (action, noop) = match action {
+            ResolvedAction::ConflictResolution(action) => (action, true),
+            ResolvedAction::VisibleUpdate(action) => (action, false),
+        };
+        let (action, value, expand, mark_name) = action.clone().decompose();
         TxOp {
             obj_type: obj.typ,
             index: 0,
